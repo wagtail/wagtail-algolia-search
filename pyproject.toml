@@ -9,6 +9,7 @@ license = "BSD"
 python = "^3.6.2"
 Django = ">=2.2,<4.0"
 wagtail = ">=2.11,<3"
+algoliasearch = "^2.5.0"
 
 [tool.poetry.dev-dependencies]
 black = "^21.9b0"

@@ -1,4 +1,15 @@
 [[package]]
+name = "algoliasearch"
+version = "2.5.0"
+description = "Algolia Search API Client for Python."
+category = "main"
+optional = false
+python-versions = "!=3.0.*,!=3.1.*,!=3.2.*,!=3.3.*,>=2.7"
+
+[package.dependencies]
+requests = ">=2.21,<3.0"
+
+[[package]]
 name = "anyascii"
 version = "0.3.0"
 description = "Unicode to ASCII transliteration"
@@ -808,9 +819,13 @@ testing = ["pytest (>=4.6)", "pytest-checkdocs (>=2.4)", "pytest-flake8", "pytes
 [metadata]
 lock-version = "1.1"
 python-versions = "^3.6.2"
-content-hash = "8250231ea17bb8e88268e7af6c9a34c6aa1f2fc1e45e6893ef7fa8418722044c"
+content-hash = "4ee63a7176afd5981496af857fd057e722ceb0bd1da55700f199fe1e156d0f5b"
 
 [metadata.files]
+algoliasearch = [
+    {file = "algoliasearch-2.5.0-py2.py3-none-any.whl", hash = "sha256:789b0dbce108e8494803835036d9c54cd212f53bfd01fc253d2882bc8ff2d668"},
+    {file = "algoliasearch-2.5.0.tar.gz", hash = "sha256:55f30029d8be666c00cfb57ce2d14f0cde438ab720278aa25012fad61e4dc89d"},
+]
 anyascii = [
     {file = "anyascii-0.3.0-py3-none-any.whl", hash = "sha256:68f6917fe5b22caf7dde8551b838e5e17d5e3c96c55734485699bd03ad92237f"},
     {file = "anyascii-0.3.0.tar.gz", hash = "sha256:24f27431fb64c6c93a33125fb66f8cba007a5262bc1faabeafeda5f4bb70b593"},
