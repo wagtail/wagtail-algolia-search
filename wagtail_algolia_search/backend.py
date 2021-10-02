@@ -125,17 +125,9 @@ class ObjectIndexer:
 
 
 class AlgoliaSearchQueryCompiler(BaseSearchQueryCompiler):
-    # # BaseSearchQueryCompiler from Wagtail raises a NotImplemented error
-    # # if we're using a custom made search backend.
-    # # This gets called in process_filter which needs the filter
-    # # to be processed so we just return the value.
-    # # 'value' is already the processed lookup so we just need to return that.
-    # def _process_lookup(self, field, lookup, value):
-    #     return value
-    #
-    # def _get_filters_from_where_node(self, where_node, check_only=False):
-    #     # A function we need to override to prevent search from crashing when .check is called
-    #     pass
+    def _get_filters_from_where_node(self, where_node, check_only=False):
+        # Filtering is done on the database so this method is unnecessary.
+        pass
 
     def get_query(self):
         return (

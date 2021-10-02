@@ -98,9 +98,49 @@ class TestAlgoliaSearchBackend(TestCase):
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0], first_blog_page)
 
-    def test_field_types(self):
-        # Create a test that checks all native field types and their Algolia representation
+    def test_filter_fields(self):
+        # Check that FilterFields are set as filterableAttributes
+
         self.fail()
 
-    def test_filter_fields(self):
+    @mock.patch("wagtail_algolia_search.backend.SearchClient")
+    def test_filtering(self, mock_SearchClient):
+        # Check that filtering works
+        client = mock_SearchClient.create()
+        index = client.init_index()
+
+        # 1. Create pages
+        root_page = Page.get_first_root_node()
+        blog_index = BlogIndexFactory(title="Blog", parent=root_page)
+        first_blog_page = BlogPageFactory(
+            title="First blog page", is_featured=True, parent=blog_index
+        )
+        second_blog_page = BlogPageFactory(title="Second blog page", parent=blog_index)
+
+        # 2. Filter and search for pages
+        # Mock out result
+        index.search.return_value = {
+            "hits": [
+                {
+                    "objectID": f"tests.BlogPage:{first_blog_page.pk}",
+                },
+                {
+                    "objectID": f"tests.BlogPage:{second_blog_page.pk}",
+                },
+            ],
+            "nbHits": 2,
+            "page": 0,
+            "nbPages": 1,
+            "hitsPerPage": 10,
+            "facets": {},
+        }
+        queryset = BlogPage.objects.filter(is_featured=True)
+        results = list(self.backend.search("blog", queryset))
+
+        # 3. Check that the correct results are returned
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0], first_blog_page)
+
+    def test_field_types(self):
+        # Create a test that checks all native field types and their Algolia representation
         self.fail()
