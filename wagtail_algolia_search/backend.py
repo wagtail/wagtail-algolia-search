@@ -3,11 +3,11 @@ from typing import Any, Dict, OrderedDict
 
 from algoliasearch.search_client import SearchClient
 from django.apps import apps
-from django.conf import settings
 from django.db import models
 from django.db.models import Case, Count, Manager, When
+from wagtail.search.index import get_indexed_models
 
-from wagtail.core.models import Page
+from wagtail.core.models import Page, TranslatableMixin
 from wagtail.search.backends.base import (
     BaseSearchBackend,
     BaseSearchQueryCompiler,
@@ -40,27 +40,35 @@ class ObjectIndexer:
         """Generates an object ID for the given model instance"""
         return f"{obj._meta.app_label}.{obj._meta.object_name}:{obj.pk}"
 
+    def get_field_key(self, model, search_field):
+        field_defined_in = search_field.get_definition_model(model)
+        return (
+            f"{field_defined_in._meta.app_label}__{field_defined_in._meta.object_name}"
+        )
+
     def get_document(self, obj):
         """Generates an Algolia document representation for a given model instance"""
         model = type(obj)
 
         doc: Dict[str, Any] = defaultdict(dict)
         doc["objectID"] = self.get_object_id(obj)
+
+        # All Algolia documents with `wagtail_managed == True` was indexed by Wagtail.
         doc["wagtail_managed"] = True
+
+        # Set locale as a root level attribute for faceting
+        doc["locale"] = None
+        if isinstance(obj, TranslatableMixin) and obj.locale:
+            doc["locale"] = obj.locale.language_code
+
+        # `model` is in the format app_label.ModelName and is used for faceting
+        doc["model"] = f"{obj._meta.app_label}.{obj._meta.object_name}"
 
         for field in model.get_search_fields():
             for current_field, value in self.prepare_field(obj, field):
-                field_defined_in = current_field.get_definition_model(obj)
-
-                # Search fields defined on Wagtail's Page class will be at the root of the document
-                if field_defined_in == Page:
-                    doc[current_field.field_name] = value
-
-                # Search fields defined on a subclass will be in a nested object
-                else:
-                    doc[f"{obj._meta.app_label}__{obj._meta.object_name}"][
-                        current_field.field_name
-                    ] = value
+                doc[self.get_field_key(model, current_field)][
+                    current_field.field_name
+                ] = value
 
         return doc
 
@@ -240,21 +248,33 @@ class AlgoliaIndex:
         This is called when `update_index` is run.
         """
 
-        default = self.index_settings["default"]
+        index_settings = self.index_settings.copy()
+        if not index_settings.get("attributesForFaceting"):
+            index_settings["attributesForFaceting"] = []
 
-        for lang, _ in settings.WAGTAIL_CONTENT_LANGUAGES:
-            index_settings = {**default, **self.index_settings.get(lang, {})}
-            if not index_settings.get("attributesForFaceting"):
-                index_settings["attributesForFaceting"] = []
-
-            # Note: All Wagtail Search managed documents have the wagtail_managed attribute set to `true`.
+        index_settings["attributesForFaceting"] += [
+            # All Wagtail Search managed documents have the wagtail_managed attribute set to `true`.
             # This is used to filter out results when searching through Wagtail to only return Wagtail managed
             # documents.
-            index_settings["attributesForFaceting"].append(
-                "filterOnly(wagtail_managed)"
-            )
+            "filterOnly(wagtail_managed)",
+            # Allow filtering and faceting by locale language code
+            "locale",
+            # Allow filtering and faceting by model type
+            "model",
+        ]
 
-            self.indices[lang].set_settings(index_settings)
+        # Add all FilterFields to attributesForFaceting
+        # NB: While we might be adding FilterFields to attributesForFaceting, we don't actually use the filters when
+        # searching. This functionality is here so the developer can choose to filter by FilterFields when querying
+        # Algolia directly. For example, when querying Algolia on the front-end.
+        for model in get_indexed_models():
+            for filter_field in model.get_filterable_search_fields():
+                if filter_field.get_definition_model(model) == model:
+                    index_settings["attributesForFaceting"].append(
+                        f"filterOnly({model._meta.app_label}__{model._meta.object_name}.{filter_field.field_name})"
+                    )
+
+        self.index.set_settings(index_settings)
 
     def add_model(self, model):
         # Not needed
@@ -302,10 +322,6 @@ class AlgoliaSearchBackend(BaseSearchBackend):
         self.application_id = params.pop("APPLICATION_ID")
         self.admin_api_key = params.pop("ADMIN_API_KEY")
         self.index_settings = params.pop("INDEX_SETTINGS")
-
-    def add_type(self, model):
-        # Not needed
-        pass
 
     def get_index(self):
         return self.index_class(

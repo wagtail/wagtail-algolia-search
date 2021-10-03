@@ -1,6 +1,7 @@
 from tests.models import BlogPage
+from django.core.management import call_command
 from wagtail_algolia_search.backend import AlgoliaSearchBackend
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from unittest import mock
 
 from tests.factories import BlogIndexFactory, BlogPageFactory
@@ -38,17 +39,21 @@ class TestAlgoliaSearchBackend(TestCase):
 
         # Check index page
         self.assertEqual(blog_index_doc["objectID"], f"tests.BlogIndex:{blog_index.pk}")
-        self.assertEqual(blog_index_doc["title"], blog_index.title)
+        self.assertEqual(blog_index_doc["wagtailcore__Page"]["title"], blog_index.title)
         self.assertTrue(blog_index_doc["wagtail_managed"])
+        self.assertEqual(blog_index_doc["locale"], "en")
+        self.assertEqual(blog_index_doc["model"], "tests.BlogIndex")
 
         # Check blog page
         self.assertEqual(blog_page_doc["objectID"], f"tests.BlogPage:{blog_page.pk}")
-        self.assertEqual(blog_page_doc["title"], blog_page.title)
+        self.assertEqual(blog_page_doc["wagtailcore__Page"]["title"], blog_page.title)
         self.assertTrue(blog_page_doc["wagtail_managed"])
         self.assertEqual(
             blog_page_doc["tests__BlogPage"]["introduction"],
             blog_page.introduction,
         )
+        self.assertEqual(blog_page_doc["locale"], "en")
+        self.assertEqual(blog_page_doc["model"], "tests.BlogPage")
 
     @mock.patch("wagtail_algolia_search.backend.SearchClient")
     def test_search(self, mock_SearchClient):
@@ -98,10 +103,67 @@ class TestAlgoliaSearchBackend(TestCase):
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0], first_blog_page)
 
-    def test_filter_fields(self):
-        # Check that FilterFields are set as filterableAttributes
+    @override_settings(
+        WAGTAILSEARCH_BACKENDS={
+            "default": {
+                "BACKEND": "wagtail_algolia_search.backend.AlgoliaSearchBackend",
+                "INDEX_NAME": "wagtail-algolia-search",
+                "APPLICATION_ID": "fake-application-id",
+                "ADMIN_API_KEY": "fake-admin-api-key",
+                "INDEX_SETTINGS": {
+                    "queryLanguages": ["en"],
+                    "ignorePlurals": True,
+                    "removeStopWords": True,
+                },
+            }
+        }
+    )
+    @mock.patch("wagtail_algolia_search.backend.SearchClient")
+    def test_settings(self, mock_SearchClient):
+        # Check that settings are set on Algolia
+        # Check that FilterFields are set as attributesForFaceting
 
-        self.fail()
+        client = mock_SearchClient.create()
+        index = client.init_index()
+
+        # 1. Call `update_index`
+        # update_settings() is called when `update_index` is executed
+        call_command("update_index")
+
+        # 2. Check that the correct settings are set on Algolia
+        index.set_settings.assert_called_once_with(
+            {
+                "queryLanguages": ["en"],
+                "ignorePlurals": True,
+                "removeStopWords": True,
+                "attributesForFaceting": [
+                    "filterOnly(wagtail_managed)",
+                    "locale",
+                    "model",
+                    "filterOnly(wagtaildocs__Document.collection)",
+                    "filterOnly(wagtaildocs__Document.title)",
+                    "filterOnly(wagtaildocs__Document.uploaded_by_user)",
+                    "filterOnly(wagtailimages__Image.collection)",
+                    "filterOnly(wagtailimages__Image.title)",
+                    "filterOnly(wagtailimages__Image.uploaded_by_user)",
+                    "filterOnly(wagtailcore__Page.title)",
+                    "filterOnly(wagtailcore__Page.id)",
+                    "filterOnly(wagtailcore__Page.live)",
+                    "filterOnly(wagtailcore__Page.owner)",
+                    "filterOnly(wagtailcore__Page.content_type)",
+                    "filterOnly(wagtailcore__Page.path)",
+                    "filterOnly(wagtailcore__Page.depth)",
+                    "filterOnly(wagtailcore__Page.locked)",
+                    "filterOnly(wagtailcore__Page.show_in_menus)",
+                    "filterOnly(wagtailcore__Page.first_published_at)",
+                    "filterOnly(wagtailcore__Page.last_published_at)",
+                    "filterOnly(wagtailcore__Page.latest_revision_created_at)",
+                    "filterOnly(wagtailcore__Page.locale)",
+                    "filterOnly(wagtailcore__Page.translation_key)",
+                    "filterOnly(tests__BlogPage.is_featured)",
+                ],
+            }
+        )
 
     @mock.patch("wagtail_algolia_search.backend.SearchClient")
     def test_filtering(self, mock_SearchClient):
@@ -143,4 +205,7 @@ class TestAlgoliaSearchBackend(TestCase):
 
     def test_field_types(self):
         # Create a test that checks all native field types and their Algolia representation
+        self.fail()
+
+    def test_faceting(self):
         self.fail()
