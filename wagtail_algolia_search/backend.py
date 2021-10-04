@@ -73,32 +73,61 @@ class ObjectIndexer:
         return doc
 
     def prepare_field(self, obj, field, parent_field=None):
+        """Yields the prepared value for a given SearchField/FilterField"""
         value = field.get_value(obj)
         if isinstance(field, (SearchField, AutocompleteField)):
             # For pure text fields, just return the value
             yield (field, value)
 
         elif isinstance(field, FilterField):
+            # FilterFields can be on a number of field types
             if isinstance(value, (models.Manager, models.QuerySet)):
+                # For ManyToMany fields, return the list of related PKs
                 value = list(value.values_list("pk", flat=True))
+
             elif isinstance(value, models.Model):
+                # For ForeignKeys, return the PK of the related object
                 value = value.pk
+
             elif isinstance(value, (list, tuple)):
+                # If the value is a list (e.g. returned by a model method), return the list of PKs if the items are
+                # model instances. Otherwise, just return the items raw and trust that the developer has returned a list
+                # of serializable objects.
                 value = [
                     item.pk if isinstance(item, models.Model) else item
                     for item in value
                 ]
 
+            # If none of the above matches, then just return the value and cross our fingers that it's JSON
+            # serializable.
             yield (field, value)
 
         elif isinstance(field, RelatedFields):
-            # Related fields needs more processing
+            # Handle RelatedFields
             sub_obj = value
             if sub_obj is None:
-                return
+                # If the sub object does not exist, set its value to None
+                yield (field, None)
 
             if isinstance(sub_obj, Manager):
-                # Related fields with many objects return a list
+                # If the RelatedField is a ManyToMany, return a list of sub objects
+                # For example:
+                # RelatedFields('books', [
+                #     index.SearchField('name'),
+                #     index.FilterField('year_published'),
+                # ])
+                #
+                # Returns:
+                # "author": [
+                #     {
+                #         'name': 'The Chronicles of Narnia',
+                #         'year_published': '1950'
+                #     },
+                #     {
+                #         'name': 'Project Hail Mary',
+                #         'year_published': '2021'
+                #     }
+                # ]
                 sub_objs = sub_obj.all()
 
                 yield (
@@ -116,7 +145,18 @@ class ObjectIndexer:
                 )
 
             else:
-                # Related fields with only one object return a dictionary
+                # If the RelatedField is a ForeignKey, return a dictionary
+                # For example:
+                # RelatedFields('author', [
+                #     index.SearchField('name'),
+                #     index.FilterField('date_of_birth'),
+                # ])
+                #
+                # Returns:
+                # "author": {
+                #     'name': 'John Doe',
+                #     'date_of_birth': '1989-02-05'
+                # }
                 if callable(sub_obj):
                     sub_obj = sub_obj()
 

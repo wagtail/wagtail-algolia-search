@@ -206,6 +206,3 @@ class TestAlgoliaSearchBackend(TestCase):
     def test_field_types(self):
         # Create a test that checks all native field types and their Algolia representation
         self.fail()
-
-    def test_faceting(self):
-        self.fail()
