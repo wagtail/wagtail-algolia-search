@@ -46,15 +46,16 @@ class ObjectIndexer:
             f"{field_defined_in._meta.app_label}__{field_defined_in._meta.object_name}"
         )
 
-    def get_document(self, obj):
-        """Generates an Algolia document representation for a given model instance"""
-        model = type(obj)
-
+    def create_base_document(self, obj, suffix=None):
         doc: Dict[str, Any] = defaultdict(dict)
         doc["objectID"] = self.get_object_id(obj)
+        if suffix:
+            doc["objectID"] += f"_{suffix}"
 
         # All Algolia documents with `wagtail_managed == True` was indexed by Wagtail.
         doc["wagtail_managed"] = True
+
+        doc["wagtail_obj_id"] = self.get_object_id(obj)
 
         # Set locale as a root level attribute for faceting
         doc["locale"] = None
@@ -64,13 +65,34 @@ class ObjectIndexer:
         # `model` is in the format app_label.ModelName and is used for faceting
         doc["model"] = f"{obj._meta.app_label}.{obj._meta.object_name}"
 
+        return doc
+
+    def get_documents(self, obj):
+        """Generates an Algolia document representation for a given model instance"""
+        model = type(obj)
+        doc = self.create_base_document(obj)
+        docs = []
+        
         for field in model.get_search_fields():
             for current_field, value in self.prepare_field(obj, field):
-                doc[self.get_field_key(model, current_field)][
-                    current_field.field_name
-                ] = value
+                # If we get back an array, we can split that between multiple docs if needed
+                if isinstance(value, list): 
+                    doc[self.get_field_key(model, current_field)][current_field.field_name] = []
+                    for val in value:
+                        if len(str(doc)) + len(str(val)) > 9500:
+                            docs.append(doc)
+                            doc = self.create_base_document(obj, len(docs))
+                            doc[self.get_field_key(model, current_field)][current_field.field_name] = []
+                        doc[self.get_field_key(model, current_field)][current_field.field_name].append(val)
+                else:
+                    if len(str(doc)) + len(str(value)) > 9500:
+                        docs.append(doc)
+                        doc = self.create_base_document(obj, len(docs))
+                    doc[self.get_field_key(model, current_field)][current_field.field_name] = value
+        
+        docs.append(doc)
 
-        return doc
+        return docs
 
     def prepare_field(self, obj, field, parent_field=None):
         """Yields the prepared value for a given SearchField/FilterField"""
@@ -182,7 +204,7 @@ class AlgoliaSearchQueryCompiler(BaseSearchQueryCompiler):
             self.query.query_string,
             {
                 "filters": "wagtail_managed:true",
-                "attributesToRetrieve": ["objectID"],
+                "attributesToRetrieve": ["wagtail_obj_id"],
                 "attributesToHighlight": [],
             },
         )
@@ -219,7 +241,7 @@ class AlgoliaSearchResults(BaseSearchResults):
 
         for hit in results["hits"]:
             try:
-                result_model_name, pk = hit["objectID"].split(":")
+                result_model_name, pk = hit["wagtail_obj_id"].split(":")
                 result_model = apps.get_model(result_model_name)
                 if issubclass(result_model, model):
                     pks.append(pk)
@@ -302,6 +324,9 @@ class AlgoliaIndex:
             # Allow filtering and faceting by model type
             "model",
         ]
+        
+        # Add de-duplicaton attribute to be used with the distinct feature
+        index_settings["attributeForDistinct"] = 'wagtail_obj_id'
 
         # Add all FilterFields to attributesForFaceting
         # NB: While we might be adding FilterFields to attributesForFaceting, we don't actually use the filters when
@@ -324,14 +349,12 @@ class AlgoliaIndex:
         self.add_items(obj._meta.model, [obj])
 
     def add_items(self, model, objs):
-        self.index.save_objects(
-            [
-                self.indexer.get_document(obj)
-                for obj in objs
-                # Do not index the root page because we don't want it to appear in search results
-                if not isinstance(obj, Page) or not obj.is_root()
-            ]
-        )
+        index_objs = []
+        for obj in objs:
+            if not isinstance(obj, Page) or not obj.is_root():
+                index_objs = index_objs + self.indexer.get_documents(obj)
+        
+        self.index.save_objects(index_objs)
 
     def delete_item(self, obj):
         object_id = self.indexer.get_object_id(obj)
